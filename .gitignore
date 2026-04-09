@@ -1,0 +1,48 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs
+*.log
+
+# OS files (because your system is messy)
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Environment variables (please don’t leak your secrets)
+.env
+
+# Coverage / testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# mypy / type check
+.mypy_cache/
+
+# PyCharm
+*.iml
+
+# Data
+*.csv
+*.png
