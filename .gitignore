@@ -46,3 +46,7 @@ htmlcov/
 # Data
 *.csv
 *.png
+
+*.joblib
+
+xgboost-model
