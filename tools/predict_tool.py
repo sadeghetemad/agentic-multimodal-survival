@@ -10,10 +10,7 @@ from config.settings import *
 from agent.llm import call_llm
 
 
-# ==========================
 # S3 ARTIFACT LOADER
-# ==========================
-
 def load_artifact_from_s3(filename):
 
     local_path = filename
@@ -30,9 +27,7 @@ def load_artifact_from_s3(filename):
     return joblib.load(local_path)
 
 
-# ==========================
 # LOAD MODEL
-# ==========================
 def load_raw_model():
     filename = "xgboost-model" 
 
@@ -58,14 +53,10 @@ def load_raw_model():
     return booster
 
 
-# ==========================
 # LOAD ARTIFACTS
-# ==========================
-
 scaler = load_artifact_from_s3("scaler.joblib")
 pca = load_artifact_from_s3("pca.joblib")
 feature_order = load_artifact_from_s3("feature_order.joblib")
-
 model = load_raw_model()
 
 predictor = PredictionService(
@@ -76,10 +67,7 @@ predictor = PredictionService(
 THRESHOLD = 0.5
 
 
-# ==========================
-# FEATURE IMPORTANCE (PCA AWARE)
-# ==========================
-
+# FEATURE IMPORTANCE
 def compute_feature_importance():
 
     score = model.get_score(importance_type="gain")
@@ -107,10 +95,7 @@ def compute_feature_importance():
     )
 
 
-# ==========================
-# BUILD EXPLANATION (LOCAL)
-# ==========================
-
+# BUILD EXPLANATION
 def build_explanation(features):
 
     importance = compute_feature_importance()
@@ -130,10 +115,7 @@ def build_explanation(features):
     return top
 
 
-# ==========================
 # LLM EXPLANATION
-# ==========================
-
 def explain_with_llm(prob, risk, feature_explanations):
 
     text = "\n".join([
@@ -142,7 +124,7 @@ def explain_with_llm(prob, risk, feature_explanations):
     ])
 
     prompt = f"""
-        You are a medical AI assistant.
+        You are an experienced medical AI assistant specializing in NSCLC diagnosis.
 
         Prediction:
         - Risk: {risk}
@@ -161,15 +143,10 @@ def explain_with_llm(prob, risk, feature_explanations):
     return call_llm(prompt)
 
 
-# ==========================
 # MAIN FUNCTION
-# ==========================
-
 def predict_multimodal(features: dict):
 
-    # -------------------------
     # Validation
-    # -------------------------
     if not features:
         return {
             "status": "error",
@@ -191,10 +168,7 @@ def predict_multimodal(features: dict):
             "message": f"Invalid feature values: {str(e)}"
         }
 
-    # -------------------------
     # Transform
-    # -------------------------
-
     df = pd.DataFrame([values], columns=feature_order)
 
     try:
@@ -206,9 +180,7 @@ def predict_multimodal(features: dict):
             "message": f"Preprocessing failed: {str(e)}"
         }
 
-    # -------------------------
-    # Predict (Endpoint)
-    # -------------------------
+    # Predict
     try:
         prob = predictor.predict(X_pca[0])
     except Exception as e:
@@ -219,10 +191,7 @@ def predict_multimodal(features: dict):
 
     risk = "high" if prob > THRESHOLD else "low"
 
-    # -------------------------
     # Explain
-    # -------------------------
-
     feature_explanations = build_explanation(features)
 
     llm_explanation = explain_with_llm(
@@ -231,9 +200,7 @@ def predict_multimodal(features: dict):
         feature_explanations
     )
 
-    # -------------------------
     # Output
-    # -------------------------
     return {
         "status": "ok",
         "probability": float(prob),
