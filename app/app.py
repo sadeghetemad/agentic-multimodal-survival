@@ -6,25 +6,87 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import streamlit as st
 from agent.agent import Agent
 import pandas as pd
+import re
 
-# -------------------------
-# INIT
-# -------------------------
-
+# ---------------- PAGE ----------------
 st.set_page_config(
-    page_title="Medical AI Agent",
-    page_icon="🧠",
+    page_title="NSCLC Survival Predictor",
+    page_icon="🫁",
     layout="wide"
 )
 
-st.title("🧠 Medical NSCLC Survival Prediction Agent")
+# ---------------- STYLE ----------------
+st.markdown("""
+<style>
+.main {
+    background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
+}
 
-st.markdown("Enter a patient ID or custom query to get prediction and analysis.")
+.block-container {
+    padding-top: 2rem;
+}
 
-# -------------------------
-# SESSION STATE
-# -------------------------
+/* HEADER */
+.header-card {
+    background: rgba(255,255,255,0.7);
+    backdrop-filter: blur(10px);
+    padding: 25px;
+    border-radius: 16px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.05);
+    margin-bottom: 20px;
+}
 
+/* INPUT */
+.stTextInput>div>div>input {
+    border-radius: 12px;
+    height: 48px;
+    padding: 10px;
+}
+
+/* BUTTON STYLE */
+.stButton>button {
+    background: linear-gradient(135deg, #4A90E2, #6FA8FF);
+    color: white;
+    border-radius: 12px;
+    height: 48px;
+    width: 100%;
+    font-weight: 600;
+    border: none;
+}
+
+
+/* CARD */
+.card {
+    background: white;
+    padding: 20px;
+    border-radius: 16px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.05);
+    margin-bottom: 20px;
+}
+
+/* BADGE */
+.badge {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-weight: 600;
+    display: inline-block;
+}
+.high {background: #ffe5e5; color: #d60000;}
+.low {background: #e6fff2; color: #00994d;}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------- HEADER ----------------
+st.markdown("""
+<div class="header-card">
+<h1>🫁 NSCLC Survival Predictor</h1>
+<p style="color:gray;margin-top:-10px;">
+AI-powered clinical decision support system
+</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ---------------- SESSION ----------------
 if "history" not in st.session_state:
     st.session_state.history = []
 
@@ -33,155 +95,119 @@ if "agent" not in st.session_state:
 
 agent = st.session_state.agent
 
+# ---------------- INPUT ----------------
+st.markdown("### 🩺 Patient Risk Assessment")
 
-# -------------------------
-# INPUT UI
-# -------------------------
+col1, col2 = st.columns([5,1])
 
-with st.container():
-
+with col1:
     user_input = st.text_input(
-        "Enter your request",
-        placeholder="e.g. Predict survival for patient R01-029"
+        "Enter clinical query",
+        placeholder="e.g. Predict survival for patient R01-029",
+        label_visibility="collapsed"
     )
 
-    run_button = st.button("🚀 Run Prediction")
+with col2:
+    run_button = st.button("🚀 Run")
 
-
-# -------------------------
-# RUN AGENT
-# -------------------------
-
+# ---------------- RUN ----------------
 if run_button and user_input:
-
-    with st.spinner("Running AI Agent..."):
-
+    with st.spinner("🫁 Processing lung data..."):
         try:
             result = agent.run(user_input, {})
 
-            # store history
             st.session_state.history.append({
                 "input": user_input,
                 "output": result
             })
 
+            st.toast("Prediction ready")
+
         except Exception as e:
-            st.error(f"Error: {str(e)}")
+            st.error(str(e))
 
-
-# -------------------------
-# OUTPUT UI
-# -------------------------
-
-# -------------------------
-# OUTPUT UI (BEAUTIFIED)
-# -------------------------
-
-st.divider()
-st.subheader("📊 Results")
+# ---------------- OUTPUT ----------------
+st.markdown("### 💬 Results")
 
 if st.session_state.history:
 
     for item in reversed(st.session_state.history):
 
-        st.markdown("### 🧑‍💻 User Query")
-        st.code(item["input"], language="text")
-
         output = item["output"]
 
-        # -------------------------
-        # PARSE OUTPUT (hacky but works)
-        # -------------------------
-        st.markdown("### 🤖 Prediction")
+        # ---------------- USER MESSAGE ----------------
+        st.markdown("**🧑‍💻 You**")
+        st.markdown(f"**{item['input']}**")
 
-        # رنگ برای risk
-        if "high" in output.lower():
-            st.error("🔴 High Risk")
-        elif "low" in output.lower():
-            st.success("🟢 Low Risk")
-        else:
-            st.warning("⚠️ Unknown Risk")
+        # ---------------- SAFETY ----------------
+        if not output or len(output.strip()) < 20:
+            st.warning("⚠️ I couldn't understand your request.")
+            st.caption("Try: Predict survival for patient R01-029")
+            st.divider()
+            continue
 
-        # probability extract
-        import re
+        if "not found" in output.lower():
+            st.error("🚫 Patient not found")
+            st.caption("Try: R01-029")
+            st.divider()
+            continue
+
+        # ---------------- PARSE ----------------
+        prob = None
         prob_match = re.search(r"Probability:\s*([0-9.]+)", output)
-
         if prob_match:
             prob = float(prob_match.group(1))
-            st.progress(prob)
-            st.caption(f"Probability: {prob:.3f}")
 
-        st.markdown("---")
+        features = []
+        for f in output.split("\n"):
+            if "-" in f and "importance" in f:
+                try:
+                    name = f.split("=")[0].replace("-", "").strip()
+                    imp = float(f.split("importance=")[1].replace(")", ""))
+                    features.append((name, imp))
+                except:
+                    continue
 
-        # -------------------------
-        # FEATURES
-        # -------------------------
-        if "Top Contributing Features" in output:
-
-            st.markdown("### 🧬 Key Features")
-
-            lines = output.split("\n")
-            features = [l for l in lines if "-" in l and "importance" in l]
-
-            if features:
-                feature_data = []
-
-                for f in features:
-                    try:
-                        name = f.split("=")[0].replace("-", "").strip()
-                        value = float(f.split("=")[1].split("(")[0])
-                        imp = float(f.split("importance=")[1].replace(")", ""))
-
-                        feature_data.append({
-                            "Feature": name,
-                            "Value": value,
-                            "Importance": imp
-                        })
-                    except:
-                        continue
-
-                if feature_data:
-                    st.dataframe(
-                        pd.DataFrame(feature_data).sort_values("Importance", ascending=False),
-                        use_container_width=True
-                    )
-
-        # -------------------------
-        # ANALYSIS
-        # -------------------------
+        analysis = ""
         if "AI Analysis" in output:
+            analysis = output.split("AI Analysis:")[-1].strip()
 
-            st.markdown("### 🧠 AI Analysis")
+        # ---------------- AI RESPONSE ----------------
+        st.markdown("🤖 **AI Response**")
 
-            analysis = output.split("AI Analysis:")[-1]
-            st.info(analysis.strip())
+        col1, col2 = st.columns([1,2])
+
+        with col1:
+            if prob is not None:
+                if prob >= 0.5:
+                    st.error("🔴 High Risk")
+                else:
+                    st.success("🟢 Low Risk")
+
+        with col2:
+            if prob is not None:
+                st.metric("Mortality Risk", f"{prob:.1%}")
+                st.progress(prob)
+
+        # -------- ANALYSIS --------
+        if analysis:
+            st.markdown("🧠 **Insight**")
+            st.write(analysis)
 
         st.divider()
 
 else:
-    st.info("No results yet. Try running a prediction.")
+    st.info("Start by entering a patient query.")
 
-# -------------------------
-# SIDEBAR
-# -------------------------
-
+# ---------------- SIDEBAR ----------------
 with st.sidebar:
 
-    st.header("⚙️ Controls")
+    st.markdown("## 🧹 Controls")
 
-    if st.button("🧹 Clear History"):
+    if st.button("Clear History"):
         st.session_state.history = []
         st.success("History cleared")
 
     st.markdown("---")
 
-    st.markdown("### 💡 Example Queries")
-
-    st.markdown("""
-    - Predict survival for patient R01-029  
-    - Predict survival for patient R01-055  
-    - Analyze patient R01-117  
-    """)
-
-    st.markdown("---")
-    st.caption("Built with LangGraph + SageMaker + LLM")
+    st.caption("Built with AWS SageMaker + Bedrock + LangGraph")
