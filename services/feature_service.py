@@ -32,9 +32,7 @@ class PatientFeatureService:
         self.region = region
         self.use_online_store = use_online_store
 
-        # -------------------------
         # AWS Session
-        # -------------------------
         boto_session = boto3.Session(region_name=region)
 
         self.sagemaker_client = boto_session.client("sagemaker")
@@ -48,9 +46,7 @@ class PatientFeatureService:
             sagemaker_featurestore_runtime_client=self.featurestore_runtime
         )
 
-        # -------------------------
         # Feature Groups
-        # -------------------------
         self.genomic_fg = FeatureGroup(
             name=genomic_fg_name,
             sagemaker_session=self.feature_store_session
@@ -64,9 +60,7 @@ class PatientFeatureService:
             sagemaker_session=self.feature_store_session
         )
 
-        # -------------------------
         # Athena Query Setup
-        # -------------------------
         self.genomic_query = self.genomic_fg.athena_query()
         self.clinical_query = self.clinical_fg.athena_query()
         self.imaging_query = self.imaging_fg.athena_query()
@@ -77,28 +71,19 @@ class PatientFeatureService:
 
         self.output_location = f"s3://{bucket}/{prefix}/feature-store-queries"
 
-        # -------------------------
         # Cache
-        # -------------------------
         self.cache = SimpleCache()
 
-    # ======================================================
     # MAIN ENTRY
-    # ======================================================
-
     def get_patient_features(self, patient_id: str) -> Optional[pd.DataFrame]:
 
-        # -------------------------
         # Cache check
-        # -------------------------
         cached = self.cache.get(patient_id)
         if cached is not None:
             print(f"[FeatureService] Cache hit for {patient_id}")
             return cached
 
-        # -------------------------
         # Route based on mode
-        # -------------------------
         if self.use_online_store:
             df = self._get_from_online_store(patient_id)
         else:
@@ -107,39 +92,32 @@ class PatientFeatureService:
         if df is None or df.empty:
             return None
 
-        # -------------------------
         # Clean & standardize
-        # -------------------------
         df = self._clean_columns(df)
 
         # ensure single row
         df = df.iloc[[0]]
 
-        # -------------------------
         # Cache result
-        # -------------------------
         self.cache.set(patient_id, df)
 
         return df
 
-    # ======================================================
-    # ATHENA (SLOW BUT FULL JOIN)
-    # ======================================================
-
+    # ATHENA Full Join Query
     def _get_from_athena(self, patient_id: str) -> Optional[pd.DataFrame]:
 
         # basic sanitization
         patient_id = patient_id.replace("'", "")
 
         query_string = f"""
-        SELECT g.*, c.*, i.*
-        FROM "{self.genomic_table}" g
-        LEFT JOIN "{self.clinical_table}" c
-            ON g.case_id = c.case_id
-        LEFT JOIN "{self.imaging_table}" i
-            ON c.case_id = i.subject
-        WHERE g.case_id = '{patient_id}'
-        """
+            SELECT g.*, c.*, i.*
+            FROM "{self.genomic_table}" g
+            LEFT JOIN "{self.clinical_table}" c
+                ON g.case_id = c.case_id
+            LEFT JOIN "{self.imaging_table}" i
+                ON c.case_id = i.subject
+            WHERE g.case_id = '{patient_id}'
+            """
 
         print(f"[FeatureService] Athena query for {patient_id}")
 
@@ -153,10 +131,7 @@ class PatientFeatureService:
 
         return df
 
-    # ======================================================
-    # ONLINE STORE (FAST, REAL-TIME)
-    # ======================================================
-
+    # ONLINE STORE
     def _get_from_online_store(self, patient_id: str) -> Optional[pd.DataFrame]:
 
         print(f"[FeatureService] Online store fetch for {patient_id}")
@@ -202,10 +177,7 @@ class PatientFeatureService:
 
         return result
 
-    # ======================================================
     # CLEANING
-    # ======================================================
-
     def _clean_columns(self, df: pd.DataFrame) -> pd.DataFrame:
 
         drop_patterns = [
