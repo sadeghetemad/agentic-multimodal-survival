@@ -4,7 +4,7 @@ from agent.llm import call_llm
 def plan(user_input, features):
 
     prompt = f"""
-        You are a medical AI agent.
+        You are a medical NSCLC Survival Prediction AI agent.
 
         Available tools:
         1. fetch_patient_tool → get patient features using patient_id

@@ -10,7 +10,7 @@ class Agent:
         state = {
             "user_input": user_input,
             "features": features,
-            "history": []   # future use
+            "history": []
         }
 
         result = self.graph.invoke(state)

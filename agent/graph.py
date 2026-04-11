@@ -1,15 +1,13 @@
 from langgraph.graph import StateGraph, END
+from typing import TypedDict
 
 from agent.planner import plan
 from agent.executor import execute_tool
 
-from typing import TypedDict
+from tools.predict_tool import predict_multimodal
 
 
-# ==========================
 # STATE
-# ==========================
-
 class AgentState(TypedDict):
     user_input: str
     features: dict
@@ -18,10 +16,8 @@ class AgentState(TypedDict):
     response: str
 
 
-# ==========================
-# FORMATTER (NEW)
-# ==========================
 
+# Output Formatter
 def format_prediction_output(pred):
 
     features_text = "\n".join([
@@ -43,10 +39,7 @@ def format_prediction_output(pred):
             """
 
 
-# ==========================
 # NODES
-# ==========================
-
 def planner_node(state):
 
     plan_output = plan(
@@ -68,18 +61,13 @@ def response_node(state):
 
     result = state["tool_result"]
 
-    # -------------------------
-    # ERROR
-    # -------------------------
+    # Error
     if result.get("status") == "error":
         return {"response": f"Error: {result['message']}"}
 
-    # -------------------------
-    # CASE 1: fetch_patient → needs prediction
-    # -------------------------
+    # CASE 1: fetch_patient
     if result.get("status") == "ok" and "features" in result:
 
-        from tools.predict_tool import predict_multimodal
 
         pred = predict_multimodal(result["features"])
 
@@ -87,25 +75,18 @@ def response_node(state):
             "response": format_prediction_output(pred)
         }
 
-    # -------------------------
     # CASE 2: already predicted
-    # -------------------------
     if result.get("status") == "ok" and "risk" in result:
 
         return {
             "response": format_prediction_output(result)
         }
 
-    # -------------------------
     # FALLBACK
-    # -------------------------
     return {"response": f"Unexpected result: {result}"}
 
 
-# ==========================
 # GRAPH
-# ==========================
-
 def build_graph():
 
     graph = StateGraph(AgentState)
