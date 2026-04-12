@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, END
-from typing import TypedDict
+from typing import TypedDict, List
 
 from agent.planner import plan
 from agent.executor import execute_tool
@@ -7,14 +7,13 @@ from agent.executor import execute_tool
 from tools.predict_tool import predict_multimodal
 
 
-# STATE
+# Agent State
 class AgentState(TypedDict):
     user_input: str
     features: dict
-    plan: dict
+    plan: List[dict]
     tool_result: dict
     response: str
-
 
 
 # Output Formatter
@@ -39,20 +38,17 @@ def format_prediction_output(pred):
             """
 
 
-# NODES
+# Nodes
 def planner_node(state):
 
-    plan_output = plan(
-        state["user_input"],
-        state["features"]
-    )
+    plan_output = plan(state["user_input"], state.get("features", {}))
 
     return {"plan": plan_output}
 
 
 def tool_node(state):
 
-    result = execute_tool(state["plan"])
+    result = execute_tool(state["plan"], state)
 
     return {"tool_result": result}
 
@@ -61,13 +57,17 @@ def response_node(state):
 
     result = state["tool_result"]
 
-    # Error
+    
     if result.get("status") == "error":
         return {"response": f"Error: {result['message']}"}
+    
+    
+    if result.get("status") == "ok" and "message" in result:
+        return {
+            "response": result["message"]
+    }
 
-    # CASE 1: fetch_patient
-    if result.get("status") == "ok" and "features" in result:
-
+    if result.get("status") == "ok" and "features" in result and "risk" not in result:
 
         pred = predict_multimodal(result["features"])
 
@@ -75,18 +75,16 @@ def response_node(state):
             "response": format_prediction_output(pred)
         }
 
-    # CASE 2: already predicted
     if result.get("status") == "ok" and "risk" in result:
 
         return {
             "response": format_prediction_output(result)
         }
 
-    # FALLBACK
     return {"response": f"Unexpected result: {result}"}
 
 
-# GRAPH
+# Graph
 def build_graph():
 
     graph = StateGraph(AgentState)
@@ -99,7 +97,6 @@ def build_graph():
 
     graph.add_edge("planner", "tool")
     graph.add_edge("tool", "respond")
-
     graph.add_edge("respond", END)
 
     return graph.compile()

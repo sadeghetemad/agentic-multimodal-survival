@@ -1,46 +1,112 @@
 import json
 from agent.llm import call_llm
 
-def plan(user_input, features):
+
+def detect_intent(text: str) -> str:
 
     prompt = f"""
-        You are a medical NSCLC Survival Prediction AI agent.
+        You are an intent classifier.
 
-        Available tools:
-        1. fetch_patient_tool → get patient features using patient_id
-        2. predict_tool → predicts survival risk using features
+        Classify the user input into one of these categories:
+        - MEDICAL → if it contains patient info, cancer, diagnosis, clinical data
+        - OUT_OF_SCOPE → greetings, casual talk, unrelated topics
 
         Rules:
-        - If user provides patient ID → use fetch_patient
-        - If features are available → use predict_tool
-        - Always return valid JSON
-        - Do not explain anything
-        - Choose ONE action
+        - Output ONLY one word
+        - No explanation
 
-        Format:
-        {{
-        "action": "...",
-        "input": {{
-            ...
-        }}
-        }}
+        Examples:
+        Input: "hi"
+        Output: OUT_OF_SCOPE
 
-        User query:
+        Input: "65 year old smoker with lung cancer"
+        Output: MEDICAL
+
+        Input:
+        {text}
+
+        Output:
+        """
+
+    response = call_llm(prompt).strip().upper()
+
+    if response not in ["MEDICAL", "OUT_OF_SCOPE"]:
+        return "OUT_OF_SCOPE"
+
+    return response
+
+
+def plan(user_input, features):
+
+    intent = detect_intent(user_input)
+
+    if intent == "OUT_OF_SCOPE":
+        return [{
+            "action": "out_of_scope",
+            "input": {
+                "message": "I am a medical AI specialized in lung cancer prediction. Please provide relevant clinical information."
+            }
+        }]
+
+    prompt = f"""
+        You are a medical AI agent for NSCLC survival prediction.
+
+        Available tools:
+        1. fetch_patient_tool
+        2. parse_features
+        3. validate_features
+        4. complete_features
+        5. predict_tool
+
+        Rules:
+
+        - If user provides patient_id:
+            return:
+            [
+            {{"action": "fetch_patient_tool", "input": {{"patient_id": "..."}}}},
+            {{"action": "predict_tool", "input": {{}}}}
+            ]
+
+        - If user provides free text:
+            return:
+            [
+            {{"action": "parse_features", "input": {{}}}},
+            {{"action": "validate_features", "input": {{}}}},
+            {{"action": "complete_features", "input": {{}}}},
+            {{"action": "predict_tool", "input": {{}}}}
+            ]
+
+        - If features are already complete:
+            return:
+            [
+            {{"action": "predict_tool", "input": {{}}}}
+            ]
+
+        - Always return ONLY JSON list
+        - No explanation
+        - Do NOT return text outside JSON
+
+        User input:
         {user_input}
 
         Current features:
         {features}
         """
-    
+
     response = call_llm(prompt)
 
     try:
         parsed = json.loads(response)
 
-        if "action" not in parsed or "input" not in parsed:
-            raise ValueError("Invalid structure")
+        if not isinstance(parsed, list):
+            raise ValueError("Planner must return list")
+
+        for step in parsed:
+            if "action" not in step:
+                raise ValueError("Invalid step structure")
 
         return parsed
 
     except Exception:
         raise ValueError(f"Invalid JSON from LLM:\n{response}")
+    
