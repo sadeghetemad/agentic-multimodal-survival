@@ -1,26 +1,21 @@
 import json
+import re
 from agent.llm import call_llm
 
 
 def detect_intent(text: str) -> str:
 
     prompt = f"""
-        You are an intent classifier.
+        You are a strict intent classifier for a medical AI system focused on lung cancer (NSCLC).
 
-        Classify the user input into one of these categories:
-        - MEDICAL → if it contains patient info, cancer, diagnosis, clinical data
-        - OUT_OF_SCOPE → greetings, casual talk, unrelated topics
+        Your task is to classify the user input into ONE of the following categories:
+
+        1. MEDICAL
+        2. OUT_OF_SCOPE
 
         Rules:
-        - Output ONLY one word
-        - No explanation
-
-        Examples:
-        Input: "hi"
-        Output: OUT_OF_SCOPE
-
-        Input: "65 year old smoker with lung cancer"
-        Output: MEDICAL
+        - Output ONLY one word: MEDICAL or OUT_OF_SCOPE
+        - Be conservative: prefer MEDICAL if uncertain
 
         Input:
         {text}
@@ -36,17 +31,48 @@ def detect_intent(text: str) -> str:
     return response
 
 
+def extract_patient_id(text: str):
+    match = re.search(r"(R\d{2}-\d+|patient[_\-]?\d+|case[_\-]?\d+)", text, re.IGNORECASE)
+    return match.group(0) if match else None
+
+
 def plan(user_input, features):
 
     intent = detect_intent(user_input)
 
+    patient_id = extract_patient_id(user_input)
+    if patient_id:
+        return [
+            {"action": "fetch_patient_tool", "input": {"patient_id": patient_id}},
+            {"action": "predict_tool", "input": {}}
+        ]
+
+
     if intent == "OUT_OF_SCOPE":
+        prompt = f"""
+        You are a medical AI specialized in lung cancer prediction.
+
+        The user asked something outside your domain.
+
+        Politely explain that their request is NOT related to lung cancer prediction.
+
+        User input:
+        "{user_input}"
+
+        Constraints:
+        - Be short (2-3 sentences)
+        - Be polite but firm
+        """
+
+        llm_response = call_llm(prompt)
+
         return [{
             "action": "out_of_scope",
             "input": {
-                "message": "I am a medical AI specialized in lung cancer prediction. Please provide relevant clinical information."
+                "message": llm_response
             }
         }]
+
 
     prompt = f"""
         You are a medical AI agent for NSCLC survival prediction.
@@ -59,13 +85,6 @@ def plan(user_input, features):
         5. predict_tool
 
         Rules:
-
-        - If user provides patient_id:
-            return:
-            [
-            {{"action": "fetch_patient_tool", "input": {{"patient_id": "..."}}}},
-            {{"action": "predict_tool", "input": {{}}}}
-            ]
 
         - If user provides free text:
             return:
@@ -82,9 +101,9 @@ def plan(user_input, features):
             {{"action": "predict_tool", "input": {{}}}}
             ]
 
+        - Do NOT invent tools
         - Always return ONLY JSON list
         - No explanation
-        - Do NOT return text outside JSON
 
         User input:
         {user_input}
@@ -109,4 +128,3 @@ def plan(user_input, features):
 
     except Exception:
         raise ValueError(f"Invalid JSON from LLM:\n{response}")
-    
