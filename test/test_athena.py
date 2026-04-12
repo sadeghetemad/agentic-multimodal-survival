@@ -2,10 +2,7 @@ import boto3
 from sagemaker.session import Session
 from sagemaker.feature_store.feature_group import FeatureGroup
 
-# ==============================
-# CONFIG
-# ==============================
-
+# Config
 REGION = "eu-west-2"
 
 GENOMIC_FG = "genomic-feature-group-05-19-10-59"
@@ -18,19 +15,13 @@ PREFIX = "multi-model-health-ml"
 OUTPUT = f"s3://{BUCKET}/{PREFIX}/athena-results/"
 
 
-# ==============================
-# SESSION
-# ==============================
-
+# Session
 def create_session():
     boto_session = boto3.Session(region_name=REGION)
     return Session(boto_session=boto_session)
 
 
-# ==============================
-# SAFE QUERY RUNNER
-# ==============================
-
+# Query Runner
 def run_query(query, sql):
     print("\n🧠 Running query:")
     print(sql)
@@ -44,10 +35,7 @@ def run_query(query, sql):
     return df
 
 
-# ==============================
-# INSPECT FEATURE GROUP
-# ==============================
-
+# Inspect Feature Group
 def inspect_feature_group(name, session):
     print(f"\n🔍 Inspecting: {name}")
 
@@ -65,11 +53,10 @@ def inspect_feature_group(name, session):
 
     print("Athena Table:", query.table_name)
 
-    # sample data
     sql = f"""
-    SELECT *
-    FROM "{query.table_name}"
-    LIMIT 5
+        SELECT *
+        FROM "{query.table_name}"
+        LIMIT 5
     """
 
     df = run_query(query, sql)
@@ -81,10 +68,7 @@ def inspect_feature_group(name, session):
     print(df.head())
 
 
-# ==============================
-# CHECK KEY VALUES
-# ==============================
-
+# Check key values
 def check_key_values(name, session):
     print(f"\n🔑 Checking key values for: {name}")
 
@@ -97,10 +81,10 @@ def check_key_values(name, session):
     query = fg.athena_query()
 
     sql = f"""
-    SELECT DISTINCT {key}
-    FROM "{query.table_name}"
-    LIMIT 20
-    """
+        SELECT DISTINCT {key}
+        FROM "{query.table_name}"
+        LIMIT 20
+        """
 
     df = run_query(query, sql)
 
@@ -108,10 +92,7 @@ def check_key_values(name, session):
     print(df)
 
 
-# ==============================
-# MAIN
-# ==============================
-
+# Main
 def run():
     session = create_session()
 
