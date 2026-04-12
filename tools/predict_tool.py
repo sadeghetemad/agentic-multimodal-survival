@@ -10,12 +10,14 @@ from config.settings import *
 from agent.llm import call_llm
 
 
-# S3 ARTIFACT LOADER
+# S3 Artifcat Loader
 def load_artifact_from_s3(filename):
 
-    local_path = filename
+    local_path = os.path.join("artifacts", filename)
 
     if not os.path.exists(local_path):
+        os.makedirs("artifacts", exist_ok=True)
+
         s3 = boto3.client("s3", region_name=AWS_REGION)
 
         s3.download_file(
@@ -27,11 +29,11 @@ def load_artifact_from_s3(filename):
     return joblib.load(local_path)
 
 
-# LOAD MODEL
+# Load model
 def load_raw_model():
-    filename = "xgboost-model" 
+    local_path = os.path.join("artifacts", "xgboost-model")
 
-    if not os.path.exists(filename):
+    if not os.path.exists(local_path):
 
         print("Downloading model from S3...")
 
@@ -39,21 +41,21 @@ def load_raw_model():
 
         s3.download_file(
             BUCKET,
-            f"{PREFIX}/artifacts/{filename}",
-            filename
+            f"{PREFIX}/artifacts/xgboost-model",
+            local_path
         )
 
     print("Loading model...")
 
     booster = xgb.Booster()
-    booster.load_model(filename)
+    booster.load_model(local_path)
 
     print("Model loaded successfully")
 
     return booster
 
 
-# LOAD ARTIFACTS
+# Load Artifacts
 scaler = load_artifact_from_s3("scaler.joblib")
 pca = load_artifact_from_s3("pca.joblib")
 feature_order = load_artifact_from_s3("feature_order.joblib")
@@ -67,7 +69,7 @@ predictor = PredictionService(
 THRESHOLD = 0.5
 
 
-# FEATURE IMPORTANCE
+# Feature Importance
 def compute_feature_importance():
 
     score = model.get_score(importance_type="gain")
@@ -95,7 +97,7 @@ def compute_feature_importance():
     )
 
 
-# BUILD EXPLANATION
+# Buld Explanator
 def build_explanation(features):
 
     importance = compute_feature_importance()
@@ -115,7 +117,7 @@ def build_explanation(features):
     return top
 
 
-# LLM EXPLANATION
+# LLM Explanator
 def explain_with_llm(prob, risk, feature_explanations):
 
     text = "\n".join([
@@ -143,7 +145,7 @@ def explain_with_llm(prob, risk, feature_explanations):
     return call_llm(prompt)
 
 
-# MAIN FUNCTION
+# Main 
 def predict_multimodal(features: dict):
 
     # Validation
@@ -153,24 +155,23 @@ def predict_multimodal(features: dict):
             "message": "Empty features"
         }
 
-    missing = [f for f in feature_order if f not in features]
-    if missing:
-        return {
-            "status": "error",
-            "message": f"Missing features: {missing}"
-        }
+    # Build Dataframe
+    df = pd.DataFrame([features])
 
-    try:
-        values = [float(features[f]) for f in feature_order]
-    except Exception as e:
+    # enforce exact training order
+    df = df.reindex(columns=feature_order)
+
+    # fill like training
+    df = df.fillna(0)
+
+    # sanity check
+    if df.shape[1] != len(feature_order):
         return {
             "status": "error",
-            "message": f"Invalid feature values: {str(e)}"
+            "message": f"Feature mismatch: expected {len(feature_order)}, got {df.shape[1]}"
         }
 
     # Transform
-    df = pd.DataFrame([values], columns=feature_order)
-
     try:
         X_scaled = scaler.transform(df)
         X_pca = pca.transform(X_scaled)
@@ -180,9 +181,11 @@ def predict_multimodal(features: dict):
             "message": f"Preprocessing failed: {str(e)}"
         }
 
+    print("PCA SHAPE:", X_pca.shape)
+
     # Predict
     try:
-        prob = predictor.predict(X_pca[0])
+        prob = predictor.predict(X_pca)
     except Exception as e:
         return {
             "status": "error",
