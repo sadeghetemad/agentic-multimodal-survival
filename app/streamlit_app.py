@@ -4,17 +4,25 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
-from agent.agent import Agent
+import uuid
 import re
 
-# Page
+from aws_agentcore.app import handler
+
+
+# -------------------------
+# PAGE CONFIG
+# -------------------------
 st.set_page_config(
     page_title="NSCLC Survival Predictor",
     page_icon="🫁",
     layout="wide"
 )
 
-# Style
+
+# -------------------------
+# STYLE
+# -------------------------
 st.markdown("""
         <style>
         .main {
@@ -25,7 +33,6 @@ st.markdown("""
             padding-top: 2rem;
         }
 
-        /* HEADER */
         .header-card {
             background: rgba(255,255,255,0.7);
             backdrop-filter: blur(10px);
@@ -35,14 +42,12 @@ st.markdown("""
             margin-bottom: 20px;
         }
 
-        /* INPUT */
         .stTextInput>div>div>input {
             border-radius: 12px;
             height: 48px;
             padding: 10px;
         }
 
-        /* BUTTON STYLE */
         .stButton>button {
             background: linear-gradient(135deg, #4A90E2, #6FA8FF);
             color: white;
@@ -53,8 +58,6 @@ st.markdown("""
             border: none;
         }
 
-
-        /* CARD */
         .card {
             background: white;
             padding: 20px;
@@ -63,19 +66,15 @@ st.markdown("""
             margin-bottom: 20px;
         }
 
-        /* BADGE */
-        .badge {
-            padding: 6px 12px;
-            border-radius: 8px;
-            font-weight: 600;
-            display: inline-block;
-        }
         .high {background: #ffe5e5; color: #d60000;}
         .low {background: #e6fff2; color: #00994d;}
         </style>
         """, unsafe_allow_html=True)
 
-# Header
+
+# -------------------------
+# HEADER
+# -------------------------
 st.markdown("""
     <div class="header-card">
     <h1>🫁 NSCLC Survival Predictor</h1>
@@ -85,19 +84,23 @@ st.markdown("""
     </div>
     """, unsafe_allow_html=True)
 
-# Session
+
+# -------------------------
+# SESSION
+# -------------------------
 if "history" not in st.session_state:
     st.session_state.history = []
 
-if "agent" not in st.session_state:
-    st.session_state.agent = Agent()
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
-agent = st.session_state.agent
 
-# Input
+# -------------------------
+# INPUT
+# -------------------------
 st.markdown("### 🩺 Patient Risk Assessment")
 
-col1, col2 = st.columns([5,1])
+col1, col2 = st.columns([5, 1])
 
 with col1:
     user_input = st.text_input(
@@ -109,11 +112,22 @@ with col1:
 with col2:
     run_button = st.button("🚀 Run")
 
-# Run
+
+# -------------------------
+# RUN AGENT
+# -------------------------
 if run_button and user_input:
     with st.spinner("🫁 AI Processing..."):
         try:
-            result = agent.run(user_input, {})
+            response = handler(
+                {
+                    "input": user_input,
+                    "session_id": st.session_state.session_id
+                },
+                None
+            )
+
+            result = response.get("response", "")
 
             st.session_state.history.append({
                 "input": user_input,
@@ -125,7 +139,10 @@ if run_button and user_input:
         except Exception as e:
             st.error(str(e))
 
-# Output
+
+# -------------------------
+# OUTPUT
+# -------------------------
 st.markdown("### 💬 Results")
 
 if st.session_state.history:
@@ -134,35 +151,28 @@ if st.session_state.history:
 
         output = item["output"]
 
-        # User Message
+        # User
         st.markdown("**🧑‍💻 You**")
         st.markdown(f"**{item['input']}**")
 
         # Safety
         if not output:
             st.warning("⚠️ I couldn't understand your request.")
-            st.caption("Try: Predict survival for patient R01-029")
-            st.divider()
-            continue
-       
-        if "Probability:" not in output:
-            st.markdown("🤖 **AI Response**")
-            st.write(output)
             st.divider()
             continue
 
         if "not found" in output.lower():
             st.error("🚫 Patient not found")
-            st.caption("Try: R01-029")
             st.divider()
             continue
 
-        # Parse
+        # Parse probability
         prob = None
         prob_match = re.search(r"Probability:\s*([0-9.]+)", output)
         if prob_match:
             prob = float(prob_match.group(1))
 
+        # Extract features
         features = []
         for f in output.split("\n"):
             if "-" in f and "importance" in f:
@@ -173,6 +183,7 @@ if st.session_state.history:
                 except:
                     continue
 
+        # Extract analysis
         analysis = ""
         if "AI Analysis" in output:
             analysis = output.split("AI Analysis:")[-1].strip()
@@ -180,21 +191,20 @@ if st.session_state.history:
         # AI Response
         st.markdown("🤖 **AI Response**")
 
-        col1, col2 = st.columns([1,2])
+        col1, col2 = st.columns([1, 2])
 
         with col1:
             if prob is not None:
                 if prob >= 0.5:
-                    st.error("🔴High Risk")
+                    st.error("🔴 High Risk")
                 else:
-                    st.success("🟢Low Risk")
+                    st.success("🟢 Low Risk")
 
         with col2:
             if prob is not None:
                 st.metric("Mortality Risk", f"{prob:.1%}")
                 st.progress(prob)
 
-        # Analysis
         if analysis:
             st.markdown("🧠 **Insight**")
             st.write(analysis)
@@ -204,7 +214,10 @@ if st.session_state.history:
 else:
     st.info("Start by entering a patient query.")
 
-# Sidebar
+
+# -------------------------
+# SIDEBAR
+# -------------------------
 with st.sidebar:
 
     st.markdown("## 🧹 Controls")
@@ -214,5 +227,4 @@ with st.sidebar:
         st.success("History cleared")
 
     st.markdown("---")
-
     st.caption("Built with AWS SageMaker + Bedrock + LangGraph")

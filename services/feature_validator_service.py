@@ -1,5 +1,4 @@
 import boto3
-import json
 from config.settings import *
 import joblib
 import io
@@ -27,7 +26,6 @@ def validate(features: dict):
 
     for f, val in features.items():
 
-        # check schema existence
         if f not in SCHEMA:
             errors.append(f"{f} not in schema")
             continue
@@ -40,4 +38,15 @@ def validate(features: dict):
         except:
             errors.append(f"{f} must be numeric")
 
-    return errors
+    if errors:
+        return {
+            "status": "error",
+            "message": errors
+        }
+
+    return {
+        "status": "ok",
+        "data": {
+            "features": features
+        }
+    }

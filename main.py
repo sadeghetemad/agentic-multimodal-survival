@@ -1,11 +1,37 @@
-from agent.graph import build_graph
+from aws_agentcore.app import handler
+import uuid
 
-graph = build_graph()
 
-input_data = {
-    "user_input": "Predict survival for age 65 and tumor size 3.2"
-}
+session_id = str(uuid.uuid4())
 
-result = graph.invoke(input_data)
+def run_query(user_input: str):
+    response = handler(
+        {
+            "input": user_input,
+            "session_id": session_id
+        },
+        None
+    )
+    return response.get("response", "")
 
-print(result["response"])
+
+# CLI LOOP
+if __name__ == "__main__":
+
+    print("🫁 NSCLC Agent (CLI Mode)")
+    print("Type 'exit' to quit\n")
+
+    while True:
+
+        user_input = input("You: ")
+
+        if user_input.lower() in ["exit", "quit"]:
+            print("Goodbye 👋")
+            break
+
+        try:
+            output = run_query(user_input)
+            print("\nAI:", output, "\n")
+
+        except Exception as e:
+            print("Error:", str(e))

@@ -7,6 +7,9 @@ from services.feature_service import PatientFeatureService
 from config.settings import *
 
 
+CACHE_PATH = "feature_matrix.pkl"
+
+
 # Init Feature Service
 feature_service = PatientFeatureService(
     region=AWS_REGION,
@@ -17,6 +20,10 @@ feature_service = PatientFeatureService(
     prefix=PREFIX
 )
 
+
+MIN_FEATURES = 3
+TOP_K = 5
+SIM_THRESHOLD = 0.5
 
 # Load Feature order
 def load_feature_order():
@@ -36,25 +43,39 @@ def load_feature_order():
 
 feature_order = load_feature_order()
 
-
-# Cache
 FEATURE_MATRIX = None
 
 def load_all_patients():
 
     global FEATURE_MATRIX
 
+    # -------------------------
+    # MEMORY CACHE
+    # -------------------------
     if FEATURE_MATRIX is not None:
         return FEATURE_MATRIX
 
+    # -------------------------
+    # DISK CACHE
+    # -------------------------
+    if os.path.exists(CACHE_PATH):
+        FEATURE_MATRIX = joblib.load(CACHE_PATH)
+        print("[CACHE] Loaded from disk")
+        return FEATURE_MATRIX
+
+    # -------------------------
+    # DB QUERY
+    # -------------------------
+    print("[DB] Loading from Athena...")
+
     query = f"""
-            SELECT *
-            FROM "{feature_service.genomic_table}" g
-            LEFT JOIN "{feature_service.clinical_table}" c
-                ON g.case_id = c.case_id
-            LEFT JOIN "{feature_service.imaging_table}" i
-                ON c.case_id = i.subject
-        """
+        SELECT *
+        FROM "{feature_service.genomic_table}" g
+        LEFT JOIN "{feature_service.clinical_table}" c
+            ON g.case_id = c.case_id
+        LEFT JOIN "{feature_service.imaging_table}" i
+            ON c.case_id = i.subject
+    """
 
     feature_service.genomic_query.run(
         query_string=query,
@@ -65,15 +86,16 @@ def load_all_patients():
     df = feature_service.genomic_query.as_dataframe()
 
     df = feature_service._clean_columns(df)
-
     df = df.reindex(columns=feature_order, fill_value=0)
 
     FEATURE_MATRIX = df.values.astype("float32")
 
-    print(f"[FeatureCompletionService] Loaded {len(FEATURE_MATRIX)} patients")
+    # save to disk
+    joblib.dump(FEATURE_MATRIX, CACHE_PATH)
+
+    print(f"[DB] Loaded {len(FEATURE_MATRIX)} patients")
 
     return FEATURE_MATRIX
-
 
 # Core Logic
 def complete(features: dict):
@@ -83,28 +105,123 @@ def complete(features: dict):
 
     matrix = load_all_patients()
 
-    # Create feature vector
-    vector = np.array([float(features.get(f, 0)) for f in feature_order])
+    print("👉 Input features:", features)
 
-    # Mask for Known features
-    mask = np.array([1 if f in features else 0 for f in feature_order])
-
-    # Similarity
-    sims = np.dot(matrix * mask, vector * mask) / (
-        np.linalg.norm(matrix * mask, axis=1) *
-        np.linalg.norm(vector * mask) + 1e-8
+    # -------------------------
+    # VECTOR + MASK
+    # -------------------------
+    vector = np.array(
+        [float(features.get(f, 0.0)) for f in feature_order],
+        dtype=float
     )
 
-    idx = int(np.argmax(sims))
-    nearest = matrix[idx]
+    mask = np.array(
+        [1.0 if f in features else 0.0 for f in feature_order],
+        dtype=float
+    )
 
-    # fill
+    num_known = int(mask.sum())
+    print(f"👉 Known features: {num_known}")
+
+    # -------------------------
+    # GUARD 1: MIN FEATURES
+    # -------------------------
+    if num_known < MIN_FEATURES:
+        return {
+            "status": "error",
+            "message": f"❌ Not enough medical data ({num_known}). Need at least {MIN_FEATURES} features."
+        }
+
+    # -------------------------
+    # MASKED SIMILARITY
+    # -------------------------
+    masked_matrix = matrix * mask
+    masked_vector = vector * mask
+
+    denom = (
+        np.linalg.norm(masked_matrix, axis=1) *
+        np.linalg.norm(masked_vector) + 1e-8
+    )
+
+    sims = np.dot(masked_matrix, masked_vector) / denom
+
+    max_sim = float(np.max(sims))
+    mean_sim = float(np.mean(sims))
+
+    print(f"👉 Similarity max={max_sim:.3f}, mean={mean_sim:.3f}")
+    
+    if np.isnan(sims).any():
+        return {
+            "status": "error",
+            "message": "❌ Invalid similarity (NaN). Input data not usable."
+        }
+
+    # -------------------------
+    # GUARD 2: SIMILARITY
+    # -------------------------
+    if max_sim < SIM_THRESHOLD:
+        return {
+            "status": "error",
+            "message": "❌ No reliable similar patient found (low similarity)."
+        }
+    
+    
+
+    # -------------------------
+    # TOP-K NEIGHBORS
+    # -------------------------
+    top_idx = np.argsort(sims)[-TOP_K:][::-1]
+    top_sims = sims[top_idx]
+    top_matrix = matrix[top_idx]
+
+    print("👉 Top sims:", top_sims)
+
+    # -------------------------
+    # WEIGHTED AVERAGE
+    # -------------------------
+    weights = top_sims / (np.sum(top_sims) + 1e-8)
+    estimated = np.average(top_matrix, axis=0, weights=weights)
+
+    # -------------------------
+    # SMART COMPLETION
+    # -------------------------
     completed = {}
 
     for i, f in enumerate(feature_order):
+
+        # keep original values
         if f in features:
             completed[f] = float(features[f])
-        else:
-            completed[f] = float(nearest[i])
+            continue
 
-    return completed
+        neighbor_values = top_matrix[:, i]
+        std = np.std(neighbor_values)
+
+        if std < 0.2:
+            completed[f] = float(estimated[i])
+        else:
+            continue
+
+    # -------------------------
+    # FINAL CHECK
+    # -------------------------
+    if len(completed) <= num_known:
+        return {
+            "status": "error",
+            "message": "❌ Unable to reliably complete missing features."
+        }
+
+    # -------------------------
+    # OUTPUT
+    # -------------------------
+    return {
+        "status": "ok",
+        "data": {
+            "features": completed,
+            "meta": {
+                "num_known": num_known,
+                "num_completed": len(completed) - num_known,
+                "max_similarity": max_sim
+            }
+        }
+    }

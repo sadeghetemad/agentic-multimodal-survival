@@ -52,4 +52,6 @@ class PredictionService:
         except Exception:
             raise ValueError(f"Invalid prediction response: {raw}")
 
-        return value
+        return {
+                "probability": value
+            }

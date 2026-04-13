@@ -90,18 +90,26 @@ class PatientFeatureService:
             df = self._get_from_athena(patient_id)
 
         if df is None or df.empty:
-            return None
+            return {
+                "status": "error",
+                "message": f"No data found for patient {patient_id}"
+            }
 
         # Clean & standardize
         df = self._clean_columns(df)
 
-        # ensure single row
         df = df.iloc[[0]]
 
-        # Cache result
-        self.cache.set(patient_id, df)
+        record = df.to_dict(orient="records")[0]
 
-        return df
+        self.cache.set(patient_id, record)
+
+        return {
+            "status": "ok",
+            "data": {
+                "features": record
+            }
+        }
 
     # ATHENA Full Join Query
     def _get_from_athena(self, patient_id: str) -> Optional[pd.DataFrame]:

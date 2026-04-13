@@ -44,31 +44,33 @@ def parse(text: str):
     feature_names = list(SCHEMA.keys())
 
     prompt = f"""
-        You are a strict JSON generator.
+    You are a strict JSON generator.
 
-        Extract features ONLY from this list:
-        {feature_names}
+    Extract features ONLY from this EXACT list:
+    {feature_names}
 
-        Rules:
-        - Output ONLY valid JSON
-        - No explanation
-        - No text before or after JSON
-        - Only include features from the list
-        - Values must be numeric (float)
-        - If a feature is not mentioned, DO NOT include it
+    Rules:
+    - ONLY use feature names from the list above
+    - DO NOT invent new feature names
+    - DO NOT use generic names like "gender" or "ethnicity"
+    - If a feature is not in the list, ignore it
+    - Output ONLY valid JSON
+    - Values must be numeric (float)
 
-        Example:
-        {{
-        "age": 65,
-        "smoking": 1,
-        "tumor_size": 4.5
-        }}
+    Example:
+    {{
+    "gender_male": 1,
+    "ethnicity_asian": 1,
+    "age": 65
+    }}
 
-        Text:
-        {text}
-        """
+    Text:
+    {text}
+    """
 
     response = call_llm(prompt)
+
+    print("👉 RAW LLM RESPONSE:", response)
 
     try:
         parsed = json.loads(response)

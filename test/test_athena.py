@@ -1,25 +1,15 @@
 import boto3
 from sagemaker.session import Session
 from sagemaker.feature_store.feature_group import FeatureGroup
+from config.settings import *
 
-# Config
-REGION = "eu-west-2"
-
-GENOMIC_FG = "genomic-feature-group-05-19-10-59"
-CLINICAL_FG = "clinical-feature-group-05-18-48-56"
-IMAGING_FG = "ct-seg-image-imaging-feature-group"
-
-BUCKET = "multimodal-lung-cancer-811165582441-eu-west-2-an"
-PREFIX = "multi-model-health-ml"
 
 OUTPUT = f"s3://{BUCKET}/{PREFIX}/athena-results/"
 
-
 # Session
 def create_session():
-    boto_session = boto3.Session(region_name=REGION)
+    boto_session = boto3.Session(region_name=AWS_REGION)
     return Session(boto_session=boto_session)
-
 
 # Query Runner
 def run_query(query, sql):

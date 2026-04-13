@@ -11,3 +11,6 @@ CLINICAL_FG = os.getenv("CLINICAL_FG")
 IMAGING_FG = os.getenv("IMAGING_FG")
 BUCKET = os.getenv("BUCKET")
 PREFIX = os.getenv("PREFIX")
+MEMORY_ID = os.getenv("MEMORY_ID")
+MODEL_THRESHOLD = os.getenv("MODEL_THRESHOLD")
+
