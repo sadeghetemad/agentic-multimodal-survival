@@ -47,6 +47,7 @@ htmlcov/
 *.csv
 *.png
 
+# Model
 *.joblib
-
 xgboost-model
+feature_matrix.pkl
