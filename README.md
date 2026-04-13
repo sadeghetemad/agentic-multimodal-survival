@@ -1,185 +1,264 @@
-# NSCLC Multimodal AI Agent Prediction System
+# NSCLC Multimodal AI Agent (AgentCore + Bedrock)
 
 ## Overview
 
 This project is an **AI-powered clinical decision support system** for
-**Non-Small Cell Lung Cancer (NSCLC)** survival prediction using
-**multimodal data**:
+**Non-Small Cell Lung Cancer (NSCLC)** survival prediction using **multimodal data**:
 
--   Clinical data (e.g. age, smoking history)
--   Genomic data (e.g. mutations, biomarkers)
--   Imaging-derived features
+- Clinical data (age, smoking, staging)
+- Genomic data (mutations, biomarkers)
+- Imaging-derived features
 
-It integrates: - AWS SageMaker (model serving) - AWS Feature Store
-(data) - Athena (data retrieval) - Bedrock LLM (reasoning +
-explanation) - LangGraph (agent orchestration)
+It integrates modern AWS services:
 
-------------------------------------------------------------------------
+- Amazon SageMaker (model inference)
+- AWS Feature Store + Athena (data layer)
+- Amazon Bedrock (LLM reasoning)
+- Amazon Bedrock AgentCore Runtime (execution layer)
+- LangGraph (agent orchestration)
 
-## Architecture
+---
 
-### Agent Pipeline
+## 🧠 System Capability
 
-1.  **User Input**
-2.  **Planner (LLM)**
-3.  **Tool Execution**
-4.  **Prediction**
-5.  **Explanation (LLM)**
+The system supports **two input modes**:
 
-Core orchestration is handled via a graph-based agent:
+### 1. Patient-based input
+If a patient ID is provided:
 
--   Planner → decides steps
--   Tools → fetch/parse/validate/complete/predict
--   Response → formatted output
+- Features are retrieved from the database (Feature Store via Athena)
+- The exact model input is constructed automatically
+- Prediction is executed directly
 
-------------------------------------------------------------------------
+---
 
-## Project Structure
+### 2. Feature-based input (free text)
+If the user provides clinical text:
 
-    agent/
-      agent.py              # Main agent interface
-      graph.py              # LangGraph workflow
-      planner.py            # LLM-based planning
-      executor.py           # Tool execution engine
-      llm.py                # Bedrock integration
+The system:
+- extracts structured features using LLM
+- validates them
+- completes missing values
+- constructs the exact model input
+- runs prediction
 
-    tools/
-      predict_tool.py
-      fetch_patient_tool.py
-      parse_features_tool.py
-      validate_features_tool.py
-      complete_features_tool.py
+---
 
-    services/
-      feature_service.py
-      feature_parser_service.py
-      feature_validator_service.py
-      feature_completion_service.py
-      prediction_service.py
+## 🔄 Agent Flow
 
-    app/
-      streamlit_app.py      # UI
+```
+User → Router → Fetch / Parse → Validate → Complete → Predict → Explain → Response
+```
 
-    config/
-      settings.py
+---
 
-------------------------------------------------------------------------
+## ⚙️ Architecture Layers
 
-## Data Sources
+| Layer | Responsibility |
+|------|--------------|
+| AgentCore Runtime | Execution + orchestration |
+| LangGraph | Decision flow |
+| Tools | Task execution |
+| Services | Business logic |
+| Bedrock LLM | Reasoning |
 
-Multimodal data stored in AWS:
+---
 
--   **Genomic Feature Group**
--   **Clinical Feature Group**
--   **Imaging Feature Group**
+## 📁 Project Structure
 
-Joined via Athena queries.
+```
+agent/
+  graph.py              # LangGraph workflow (core logic)
+  llm.py                # Bedrock LLM wrapper
 
-------------------------------------------------------------------------
+aws_agentcore/
+  app.py                # AgentCore entrypoint
+  client.py             # Runtime integration
 
-## Features
+services/
+  feature_service.py
+  feature_parser_service.py
+  feature_validator_service.py
+  feature_completion_service.py
+  prediction_pipeline.py
+  prediction_service.py
 
-### 1. Intelligent Agent
+tools/
+  langchain_tools.py    # Agent tools
 
--   Automatically understands user intent
--   Plans execution steps dynamically
+app/
+  streamlit_app.py      # UI
 
-### 2. Multimodal Prediction
+artifacts/
+  xgboost-model
+  scaler.joblib
+  pca.joblib
 
--   Combines clinical + genomic + imaging
--   Uses PCA + XGBoost model
+config/
+  settings.py
+```
 
-### 3. Feature Completion
+---
 
--   Missing data filled using nearest neighbor similarity
+## 🧩 Agent Logic (LangGraph)
 
-### 4. Explainability
+### Routing Decision
 
--   Feature importance (model-based)
--   Clinical reasoning (LLM-generated)
+The agent uses an LLM to classify input:
 
-------------------------------------------------------------------------
+- `"patient"` → use database
+- `"text"` → extract features
 
-## Example Usage
+---
 
-### Input
+### Patient Flow
 
-    65 year old smoker with tumor size 4.5 cm
+```
+route → fetch → predict → respond
+```
 
-### Output
+Steps:
+- Retrieve patient features from Athena
+- Build model input
+- Run prediction
 
-    Risk: high
-    Probability: 0.78
+---
 
-    Top Features:
-    - tumor_size
-    - smoking
-    - age
+### Text Flow
 
-    AI Analysis:
-    Patient is high risk due to large tumor size and smoking history.
+```
+route → parse → validate → complete → predict → respond
+```
 
-------------------------------------------------------------------------
+Steps:
+1. Extract features from text
+2. Validate schema and values
+3. Complete missing features
+4. Build final model input
+5. Run prediction
 
-## How It Works
+---
 
-### Planning
+## 🔬 Prediction Pipeline
 
-LLM classifies input: - MEDICAL → run pipeline - OUT_OF_SCOPE → reject
+```
+Input → Features → Scaling → PCA → XGBoost → SHAP → LLM Explanation
+```
+
+---
+
+## 📊 Explainability
+
+### 1. Model-level (SHAP)
+
+- Feature contribution scores
+- Mapped back from PCA space to original features
+
+---
+
+### 2. LLM-level (Clinical reasoning)
+
+- Explains why risk is high/low
+- Uses top contributing features
+- Provides cautious interpretation
+
+---
+
+## 🤖 AgentCore Runtime
+
+### Entry Point
+
+```
+aws_agentcore/app.py
+```
+
+Handles:
+- Request lifecycle
+- State passing
+- Tool execution
+
+---
 
 ### Execution Flow
 
-    parse → validate → complete → predict
+```
+AgentCore → Graph → Tools → Services → Model → LLM → Response
+```
 
-### Prediction Pipeline
+---
 
-1.  Feature normalization
-2.  PCA transformation
-3.  XGBoost inference (SageMaker endpoint)
+## 📈 Example
 
-------------------------------------------------------------------------
+### Input
 
-## Setup
+```
+R01-029
+```
+
+### Output
+
+```
+Risk: low
+Probability: 0.47
+
+Top Features:
+- pleural invasion (no)
+- tumor stage
+- genomic markers
+
+AI Analysis:
+Patient shows relatively low mortality risk due to absence of pleural invasion...
+```
+
+---
+
+## 🚀 Setup
 
 ### Requirements
 
--   Python 3.11+
--   AWS credentials configured
--   SageMaker endpoint deployed
+- Python 3.10+
+- AWS credentials configured
+- SageMaker endpoint deployed
+- Bedrock access enabled
+
+---
 
 ### Install
 
-``` bash
+```bash
 pip install -r requirements.txt
 ```
 
-### Run App
+---
 
-``` bash
-streamlit run app.py
+### Run UI
+
+```bash
+streamlit run app/streamlit_app.py
 ```
 
-------------------------------------------------------------------------
+---
 
-## AWS Configuration
+## ☁️ AWS Requirements
 
-Required: - S3 bucket (artifacts) - Feature Store (3 groups) - Athena
-enabled - SageMaker endpoint
+- S3 bucket (artifacts)
+- Feature Store (multiple groups)
+- Athena query access
+- SageMaker endpoint
+- Bedrock model access
+- AgentCore runtime configured
 
-------------------------------------------------------------------------
+---
 
-## Notes
+## ⚠️ Notes
 
--   Designed for research / clinical decision support
--   Not a replacement for medical diagnosis
--   Extendable to other cancers
+- This is a research / decision support tool
+- Not intended for diagnosis
+- Outputs must be interpreted by professionals
 
-------------------------------------------------------------------------
+---
 
-## Future Work
+## 🔮 Future Work
 
--   Add survival time prediction
--   Integrate radiology images directly (CNN/ViT)
--   Improve feature engineering
--   Integrate with Amazon Bedrock AgentCore
-
+- Deep multimodal models (ViT + omics)
+- Fully managed AgentCore workflows
