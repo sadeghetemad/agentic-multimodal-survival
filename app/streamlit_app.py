@@ -7,7 +7,7 @@ import streamlit as st
 import uuid
 import re
 
-from aws_agentcore.app import handler
+from app.agentcore_app import handler
 
 
 # -------------------------
