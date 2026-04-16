@@ -1,7 +1,5 @@
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 import uuid
-import os
-
 
 # -------------------------
 # INIT APP
@@ -35,6 +33,7 @@ def handler(payload, context):
     # -------------------------
     user_input = payload.get("input", "")
     session_id = payload.get("session_id")
+
     if not session_id:
         session_id = str(uuid.uuid4())
 

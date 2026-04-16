@@ -10,13 +10,22 @@ from services.prediction_service import PredictionService
 from config.settings import *
 from agent.llm import call_llm
 
+from pathlib import Path
+import tempfile
+
+
+if os.getenv("ENV") == "prod":
+    base_dir = Path(tempfile.gettempdir())   # AWS / container
+else:
+    base_dir = Path("artifacts")    
+
 
 # =========================
 # S3 Artifact Loader
 # =========================
 def load_artifact_from_s3(filename):
 
-    local_path = os.path.join("artifacts", filename)
+    local_path = base_dir / filename
 
     if not os.path.exists(local_path):
         print(f"⬇️ Downloading {filename} from S3...")
@@ -36,7 +45,7 @@ def load_artifact_from_s3(filename):
 # =========================
 def load_raw_model(filename):
 
-    local_path = os.path.join("artifacts", filename)
+    local_path = base_dir / filename
 
     if not os.path.exists(local_path):
         print("⬇️ Downloading model from S3...")
