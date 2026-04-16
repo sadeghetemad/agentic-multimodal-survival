@@ -71,9 +71,9 @@ agent/
   graph.py              # LangGraph workflow (core logic)
   llm.py                # Bedrock LLM wrapper
 
-aws_agentcore/
-  app.py                # AgentCore entrypoint
-  client.py             # Runtime integration
+app/
+  streamlit_app.py         # Streamlit app (UI)
+  agentcore_app.py         # AgentCore app entrypoint
 
 services/
   feature_service.py
@@ -86,8 +86,6 @@ services/
 tools/
   langchain_tools.py    # Agent tools
 
-app/
-  streamlit_app.py      # UI
 
 artifacts/
   xgboost-model
