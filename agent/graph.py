@@ -1,6 +1,7 @@
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Dict
 from langchain_aws import ChatBedrock
+from agent.llm import get_llm
 
 import json
 
@@ -11,16 +12,6 @@ from tools.langchain_tools import (
     complete_features,
     fetch_patient,
     predict
-)
-
-
-# -------------------------
-# LLM
-# -------------------------
-llm = ChatBedrock(
-    model=BEDROCK_MODEL,
-    region=AWS_REGION,
-    model_kwargs={"temperature": 0}
 )
 
 
@@ -65,6 +56,7 @@ def route_node(state: AgentState):
         Input:
         {state["input"]}
         """
+    llm = get_llm()
     res = llm.invoke(prompt).content.strip()
 
     try:
@@ -289,5 +281,11 @@ def build_graph():
     graph.add_edge("predict", "respond")
     graph.add_edge("respond", END)
 
-    
-    return graph.compile()
+    graph = graph.compile()
+
+    png_bytes = graph.get_graph().draw_mermaid_png()
+
+    with open("langgraph.png", "wb") as f:
+        f.write(png_bytes)
+
+    return graph
