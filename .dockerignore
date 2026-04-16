@@ -1,0 +1,76 @@
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.*
+*.env
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE / editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Tests
+tests/
+pytest.ini
+
+# Data
+data/
+datasets/
+*.csv
+*.parquet
+
+# Artifacts / outputs
+artifacts/
+outputs/
+models/
+checkpoints/
+
+# Streamlit (optional)
+.streamlit/
+
+# Docker files 
+docker/
+docker-compose.yml
+
+# Misc
+*.sqlite3
+*.db
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.onnx
+*.jpg
+*.png
+
+
