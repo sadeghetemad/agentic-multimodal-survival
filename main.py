@@ -1,4 +1,4 @@
-from aws_agentcore.app import handler
+from app.agentcore_app import handler
 import uuid
 
 
