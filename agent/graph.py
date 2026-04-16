@@ -1,11 +1,9 @@
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Dict
-from langchain_aws import ChatBedrock
-from agent.llm import get_llm
+from agent.llm import call_llm
 
 import json
 
-from config.settings import AWS_REGION, BEDROCK_MODEL
 from tools.langchain_tools import (
     parse_features,
     validate_features,
@@ -35,7 +33,6 @@ def route_node(state: AgentState):
 
     print("👉 router_node")
 
-
     prompt = f"""
         Extract structured info from input.
 
@@ -56,8 +53,11 @@ def route_node(state: AgentState):
         Input:
         {state["input"]}
         """
-    llm = get_llm()
-    res = llm.invoke(prompt).content.strip()
+    
+    # llm = get_llm()
+    # res = llm.invoke(prompt).content.strip()
+
+    res = call_llm(prompt)
 
     try:
         data = json.loads(res)
@@ -281,10 +281,11 @@ def build_graph():
     graph.add_edge("predict", "respond")
     graph.add_edge("respond", END)
 
+    # compile graph
     graph = graph.compile()
 
+    # draw graph
     png_bytes = graph.get_graph().draw_mermaid_png()
-
     with open("langgraph.png", "wb") as f:
         f.write(png_bytes)
 
