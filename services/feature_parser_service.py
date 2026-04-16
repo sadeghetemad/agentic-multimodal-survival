@@ -22,8 +22,13 @@ def load_schema():
     return schema
 
 
-SCHEMA = load_schema()
+SCHEMA = None
 
+def get_schema():
+    global SCHEMA
+    if SCHEMA is None:
+        SCHEMA = load_schema()
+    return SCHEMA
 
 # Json Extactor
 def extract_json(text: str):
@@ -41,7 +46,8 @@ def extract_json(text: str):
 # Main Parser
 def parse(text: str):
 
-    feature_names = list(SCHEMA.keys())
+    schema = get_schema()
+    feature_names = list(schema.keys())
 
     prompt = f"""
     You are a strict JSON generator.

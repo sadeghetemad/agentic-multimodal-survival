@@ -18,15 +18,24 @@ def load_schema():
     return schema
 
 
-SCHEMA = load_schema()
+SCHEMA = None
+
+def get_schema():
+    global SCHEMA
+    if SCHEMA is None:
+        SCHEMA = load_schema()
+    return SCHEMA
+
 
 def validate(features: dict):
 
     errors = []
 
+    scma = get_schema()
+
     for f, val in features.items():
 
-        if f not in SCHEMA:
+        if f not in scma:
             errors.append(f"{f} not in schema")
             continue
 

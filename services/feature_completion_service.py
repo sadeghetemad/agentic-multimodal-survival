@@ -9,16 +9,20 @@ from config.settings import *
 
 CACHE_PATH = "feature_matrix.pkl"
 
+_feature_service = None
 
-# Init Feature Service
-feature_service = PatientFeatureService(
-    region=AWS_REGION,
-    genomic_fg_name=GENOMIC_FG,
-    clinical_fg_name=CLINICAL_FG,
-    imaging_fg_name=IMAGING_FG,
-    bucket=BUCKET,
-    prefix=PREFIX
-)
+def get_feature_service():
+    global _feature_service
+    if _feature_service is None:
+        _feature_service = PatientFeatureService(
+            region=AWS_REGION,
+            genomic_fg_name=GENOMIC_FG,
+            clinical_fg_name=CLINICAL_FG,
+            imaging_fg_name=IMAGING_FG,
+            bucket=BUCKET,
+            prefix=PREFIX
+        )
+    return _feature_service
 
 
 MIN_FEATURES = 3
@@ -41,7 +45,14 @@ def load_feature_order():
     return joblib.load(filename)
 
 
-feature_order = load_feature_order()
+feature_order = None
+
+def get_feature_order():
+    global feature_order
+    if feature_order is None:
+        feature_order = load_feature_order()
+    return feature_order
+
 
 FEATURE_MATRIX = None
 
@@ -68,6 +79,8 @@ def load_all_patients():
     # -------------------------
     print("[DB] Loading from Athena...")
 
+    feature_service = get_feature_service()
+
     query = f"""
         SELECT *
         FROM "{feature_service.genomic_table}" g
@@ -86,6 +99,7 @@ def load_all_patients():
     df = feature_service.genomic_query.as_dataframe()
 
     df = feature_service._clean_columns(df)
+    feature_order = get_feature_order()
     df = df.reindex(columns=feature_order, fill_value=0)
 
     FEATURE_MATRIX = df.values.astype("float32")
@@ -110,6 +124,7 @@ def complete(features: dict):
     # -------------------------
     # VECTOR + MASK
     # -------------------------
+    feature_order = get_feature_order()
     vector = np.array(
         [float(features.get(f, 0.0)) for f in feature_order],
         dtype=float
@@ -164,8 +179,6 @@ def complete(features: dict):
             "status": "error",
             "message": "❌ No reliable similar patient found (low similarity)."
         }
-    
-    
 
     # -------------------------
     # TOP-K NEIGHBORS
