@@ -9,39 +9,24 @@ from services.prediction_pipeline import predict_multimodal
 from config.settings import *
 
 
-# -------------------------
-# INIT FEATURE SERVICE
-# -------------------------
 feature_service = PatientFeatureService(
     region=AWS_REGION,
     genomic_fg_name=GENOMIC_FG,
     clinical_fg_name=CLINICAL_FG,
     imaging_fg_name=IMAGING_FG,
     bucket=BUCKET,
-    prefix=PREFIX
+    prefix=PREFIX,
+    use_online_store=True,
+    cache_ttl_seconds=3600,
+    cache_max_size=5000
 )
 
 
-# -------------------------
-# PARSE
-# -------------------------
 @tool
 def parse_features(text: str) -> Dict:
     """
     Extract structured medical features from raw clinical text.
-
-    INPUT:
-        text (string)
-
-    OUTPUT:
-        {
-            "status": "ok",
-            "data": {
-                "features": {...}
-            }
-        }
     """
-
     if not text:
         return {
             "status": "error",
@@ -51,10 +36,14 @@ def parse_features(text: str) -> Dict:
     try:
         features = parse(text)
 
-        if not features or len(features) == 0:
+        if not features:
             return {
                 "status": "error",
-                "message": "❌ No medical information found in the input. Please provide relevant clinical data such as age, smoking status, tumor size, or other medical features."
+                "message": (
+                    "❌ No medical information found in the input. "
+                    "Please provide relevant clinical data such as age, smoking status, "
+                    "tumor size, or other medical features."
+                )
             }
 
         return {
@@ -71,26 +60,11 @@ def parse_features(text: str) -> Dict:
         }
 
 
-# -------------------------
-# VALIDATE
-# -------------------------
 @tool
 def validate_features(features: Dict) -> Dict:
     """
     Validate extracted features.
-
-    INPUT:
-        features (dict)
-
-    OUTPUT:
-        {
-            "status": "ok",
-            "data": {
-                "features": {...}
-            }
-        }
     """
-
     if not isinstance(features, dict) or not features:
         return {
             "status": "error",
@@ -100,26 +74,11 @@ def validate_features(features: Dict) -> Dict:
     return validate(features)
 
 
-# -------------------------
-# COMPLETE
-# -------------------------
 @tool
 def complete_features(features: Dict) -> Dict:
     """
     Fill missing features using similarity-based completion.
-
-    INPUT:
-        features (dict)
-
-    OUTPUT:
-        {
-            "status": "ok",
-            "data": {
-                "features": {...}
-            }
-        }
     """
-
     if not isinstance(features, dict) or not features:
         return {
             "status": "error",
@@ -129,15 +88,14 @@ def complete_features(features: Dict) -> Dict:
     try:
         completed = complete(features)
 
-        if isinstance(completed, dict) and completed.get("status") == "error":
-            return completed
-
-        return {
-            "status": "ok",
-            "data": {
-                "features": completed
+        if not isinstance(completed, dict):
+            return {
+                "status": "error",
+                "message": "Completion returned invalid output"
             }
-        }
+
+        # complete(...) already returns {"status": ..., "data": ...}
+        return completed
 
     except Exception as e:
         return {
@@ -146,13 +104,10 @@ def complete_features(features: Dict) -> Dict:
         }
 
 
-# -------------------------
-# FETCH PATIENT
-# -------------------------
 @tool
 def fetch_patient(patient_id: str) -> Dict:
     """
-    Fetch patient features
+    Fetch patient features.
     """
     if not patient_id:
         return {
@@ -162,24 +117,25 @@ def fetch_patient(patient_id: str) -> Dict:
 
     result = feature_service.get_patient_features(patient_id)
 
-    if "features" in result:
-        features = result.get("features", {})
-    else:
-        features = result.get("data", {}).get("features", {})
+    if result.get("status") != "ok":
+        return result
+
+    features = result.get("data", {}).get("features", {})
 
     return {
         "status": "ok",
-        "features": features
+        "data": {
+            "features": features
+        }
     }
 
-# -------------------------
-# PREDICT
-# -------------------------
+
 @tool
 def predict(features: Dict) -> Dict:
     """
-    Predict NSCLC survival risk using full multimodal pipeline.
+    Predict NSCLC survival risk using fast multimodal pipeline.
     """
+    print("👉 predict: Received features:", features)
 
     if not isinstance(features, dict) or not features:
         return {
@@ -187,6 +143,4 @@ def predict(features: Dict) -> Dict:
             "message": "Invalid features"
         }
 
-    result = predict_multimodal(features)
-
-    return result
+    return predict_multimodal(features, explain=True)

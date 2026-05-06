@@ -1,0 +1,16 @@
+[
+  {
+    "name": "fetch_patient",
+    "description": "Fetch multimodal patient features from Feature Store by patient ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "patient_id": {
+          "type": "string",
+          "description": "Patient identifier"
+        }
+      },
+      "required": ["patient_id"]
+    }
+  }
+]

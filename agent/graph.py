@@ -1,123 +1,330 @@
 from langgraph.graph import StateGraph, END
-from typing import TypedDict, Dict
-from agent.llm import call_llm
-
+from typing import TypedDict, Dict, Any, List, Optional
 import json
+import re
 
-from tools.langchain_tools import (
-    parse_features,
-    validate_features,
-    complete_features,
-    fetch_patient,
-    predict
-)
+from agent.llm import call_llm
+from agent.memory import get_checkpointer
+from agent.clinical_memory_service import ClinicalMemoryService
+from tools.provider_factory import get_tool_provider
 
 
-# -------------------------
-# STATE
-# -------------------------
-class AgentState(TypedDict):
+memory_service = ClinicalMemoryService()
+tool_provider = get_tool_provider()
+
+
+class AgentState(TypedDict, total=False):
     input: str
     route: str
-    features: Dict
-    patient_id: str 
-    prediction: Dict
+    features: Dict[str, Any]
+    patient_id: Optional[str]
+    prediction: Dict[str, Any]
     response: str
     valid: bool
+    actor_id: str
+    session_id: str
+    clinician_preferences: Dict[str, Any]
+    session_summary_texts: List[str]
+    planner_decision: Dict[str, Any]
+    session_preferences_update: Dict[str, Any]
+    followup_intent: str
 
 
-# -------------------------
-# ROUTER NODE
-# -------------------------
-def route_node(state: AgentState):
+def safe_json_loads(text: str) -> Dict[str, Any]:
+    if not text:
+        return {}
 
-    print("👉 router_node")
-
-    prompt = f"""
-        Extract structured info from input.
-
-        Return ONLY valid JSON like this:
-
-        {{
-        "type": "patient" OR "text",
-        "patient_id": "string or null"
-        }}
-
-        Rules:
-        - If user refers to a patient → type = "patient"
-        - Extract exact patient id if possible
-        - If no clear id → patient_id = null
-        - DO NOT explain anything
-        - ONLY return JSON
-
-        Input:
-        {state["input"]}
-        """
-    
-    # llm = get_llm()
-    # res = llm.invoke(prompt).content.strip()
-
-    res = call_llm(prompt)
+    text = text.strip()
 
     try:
-        data = json.loads(res)
+        return json.loads(text)
+    except Exception:
+        pass
 
-        route = data.get("type", "text")
-        patient_id = data.get("patient_id")
+    start = text.find("{")
+    end = text.rfind("}")
 
-        print("🧠 ROUTE:", route)
-        print("🆔 ID:", patient_id)
+    if start != -1 and end != -1 and end > start:
+        candidate = text[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
 
+    return {}
+
+
+def normalize_features_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+
+    data = result.get("data", {})
+    if isinstance(data, dict) and isinstance(data.get("features"), dict):
+        return data["features"]
+
+    features = result.get("features")
+    if isinstance(features, dict):
+        return features
+
+    return {}
+
+
+def merge_preferences(
+    stored_prefs: Optional[Dict[str, Any]],
+    planner_update: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    merged = {}
+    if isinstance(stored_prefs, dict):
+        merged.update(stored_prefs)
+    if isinstance(planner_update, dict):
+        merged.update(planner_update)
+    return merged
+
+
+PATIENT_ID_RE = re.compile(r"^[A-Za-z]\d{2}-\d{3}$|^R\d{2}-\d{3}$")
+
+
+def looks_like_patient_id(text: str) -> bool:
+    if not text:
+        return False
+
+    return bool(PATIENT_ID_RE.match(text.strip()))
+
+
+def llm_react_plan(
+    user_input: str,
+    current_patient_id: Optional[str],
+    session_summary_texts: Optional[List[str]],
+    clinician_preferences: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    prompt = f"""
+        You are a clinical workflow planner for an NSCLC survival prediction assistant.
+
+        Your job:
+        - Decide whether the user wants:
+        1) patient lookup / patient-based prediction flow
+        2) free-text clinical feature parsing flow
+        - Resolve ambiguous follow-up questions using memory context
+        - Extract preference changes such as concise/detailed, show top features, top 3/top 5, technical/plain wording
+
+        IMPORTANT:
+        - Think step by step internally, but DO NOT reveal your reasoning.
+        - Return ONLY valid JSON.
+        - If the user is referring to the previous patient/case in the current session, set "use_last_case": true.
+        - If a clear patient id is present, extract it.
+        - If no patient id is present but this is clearly a follow-up to the current session context, use action="patient" and use_last_case=true.
+        - If the user is giving fresh raw medical description, use action="text".
+        - This system predicts survival risk, not diagnosis.
+
+        Memory context:
+        current_patient_id = {json.dumps(current_patient_id)}
+        session_summary_texts = {json.dumps(session_summary_texts or [], ensure_ascii=False)}
+        clinician_preferences = {json.dumps(clinician_preferences or {}, ensure_ascii=False)}
+
+        Return ONLY JSON with this exact schema:
+        {{
+        "action": "patient" | "text",
+        "patient_id": "string or null",
+        "use_last_case": true | false,
+        "followup_intent": "none" | "explain" | "rerun_prediction" | "top_features" | "confidence" | "summary",
+        "preferences_update": {{
+            "response_style": "concise" | "detailed" | null,
+            "tone": "technical" | "plain" | null,
+            "show_top_features": true | false | null,
+            "top_k_features": 3 | 5 | null
+        }}
+        }}
+
+        User input:
+        {user_input}
+        """
+
+    raw = call_llm(prompt)
+    data = safe_json_loads(raw)
+
+    if not data:
         return {
-            "route": route,
-            "patient_id": patient_id
+            "action": "text",
+            "patient_id": None,
+            "use_last_case": False,
+            "followup_intent": "none",
+            "preferences_update": {}
         }
 
-    except Exception as e:
-        print("❌ ROUTER ERROR:", e)
+    prefs = data.get("preferences_update", {})
+    if not isinstance(prefs, dict):
+        prefs = {}
 
+    prefs = {k: v for k, v in prefs.items() if v is not None}
+
+    action = data.get("action", "text")
+
+    # enforce schema
+    if action not in ["patient", "text"]:
+        if action in ["explain", "summary", "top_features", "confidence", "rerun_prediction"]:
+            action = "patient"
+        else:
+            action = "text"
+
+    return {
+        "action": action,
+        "patient_id": data.get("patient_id"),
+        "use_last_case": bool(data.get("use_last_case", False)),
+        "followup_intent": data.get("followup_intent", "none"),
+        "preferences_update": prefs
+    }
+
+
+def load_memory_context_node(state: AgentState):
+    print("👉 load_memory_context_node")
+
+    user_input = state.get("input", "")
+
+    # Fast path: if user entered patient ID, skip AgentCore Memory read
+    if looks_like_patient_id(user_input):
+        return {
+            "clinician_preferences": {},
+            "session_summary_texts": []
+        }
+
+    actor_id = state.get("actor_id", "default-user")
+    session_id = state.get("session_id", "default-session")
+
+    preferences_result = memory_service.get_preferences(
+        actor_id=actor_id,
+        query=user_input or "clinician output preferences"
+    )
+
+    summary_result = memory_service.get_session_summary(
+        actor_id=actor_id,
+        session_id=session_id,
+        query=user_input or "summary of this session"
+    )
+
+    return {
+        "clinician_preferences": preferences_result.get("parsed", {}),
+        "session_summary_texts": summary_result.get("raw_texts", [])
+    }
+
+
+def route_node(state: AgentState):
+    print("👉 route_node (LLM planner)")
+
+    current_patient_id = state.get("patient_id")
+    session_summary_texts = state.get("session_summary_texts", [])
+    clinician_preferences = state.get("clinician_preferences", {})
+    user_input = state["input"]
+
+    # Fast path: direct patient ID should not go to LLM planner
+    if looks_like_patient_id(user_input):
+
+        patient_id = user_input.strip()
+
+        return {
+            "route": "patient",
+            "patient_id": patient_id,
+            "planner_decision": {},
+            "session_preferences_update": {},
+            "followup_intent": "none"
+        }
+
+    plan = llm_react_plan(
+        user_input=user_input,
+        current_patient_id=current_patient_id,
+        session_summary_texts=session_summary_texts,
+        clinician_preferences=clinician_preferences
+    )
+
+    raw_action = plan.get("action", "text")
+    patient_id = plan.get("patient_id")
+    use_last_case = plan.get("use_last_case", False)
+    followup_intent = plan.get("followup_intent", "none")
+    preferences_update = plan.get("preferences_update", {})
+
+    # NORMALIZE ACTION
+    if raw_action in ["explain", "summary", "top_features", "confidence", "rerun_prediction"]:
+        route = "patient" if use_last_case or current_patient_id else "text"
+    elif raw_action in ["patient", "text"]:
+        route = raw_action
+    else:
+        route = "text"
+
+    # REUSE CURRENT SESSION PATIENT
+    if use_last_case and not patient_id:
+        patient_id = current_patient_id
+
+
+    if route == "patient" and not patient_id:
         return {
             "route": "text",
-            "patient_id": None
+            "patient_id": None,
+            "planner_decision": plan,
+            "session_preferences_update": preferences_update,
+            "followup_intent": followup_intent,
+            "valid": False,
+            "response": "❌ No previous patient context found in this session."
         }
 
+    print("PLAN:", plan)
+    print("CURRENT PATIENT ID:", current_patient_id)
+    print("FINAL PATIENT ID:", patient_id)
+    print("ROUTE:", route)
 
-# -------------------------
-# PATIENT FLOW
-# -------------------------
+    return {
+        "route": route,
+        "patient_id": patient_id,
+        "planner_decision": plan,
+        "session_preferences_update": preferences_update,
+        "followup_intent": followup_intent
+    }
+
+
 def fetch_node(state: AgentState):
-
     print("👉 fetch_node")
 
     patient_id = state.get("patient_id")
 
-    print("🆔 USING ID:", patient_id)
+    print("FETCH PATIENT ID:", patient_id)
 
     if not patient_id:
         return {
-            **state,
-            "features": {}
+            "features": {},
+            "valid": False,
+            "response": "❌ No patient_id available."
         }
 
-    result = fetch_patient.invoke({
-        "patient_id": patient_id
-    })
+    result = tool_provider.fetch_patient(patient_id)
+
+    if result.get("status") != "ok":
+        return {
+            "features": {},
+            "valid": False,
+            "response": result.get(
+                "message",
+                f"❌ Failed to fetch features for patient {patient_id}"
+            )
+        }
+
+    features = normalize_features_result(result)
+
+    if not features:
+        return {
+            "features": {},
+            "valid": False,
+            "response": f"❌ No usable features found for patient {patient_id}"
+        }
 
     return {
-        **state,
-        "features": result.get("features", {})
+        "features": features,
+        "valid": True,
+        "patient_id": patient_id
     }
 
-# -------------------------
-# TEXT FLOW
-# -------------------------
-def parse_node(state: AgentState):
 
+def parse_node(state: AgentState):
     print("👉 parse_node")
 
-    parsed = parse_features.invoke({
-        "text": state["input"]
-    })
+    parsed = tool_provider.parse_features(state["input"])
 
     if parsed.get("status") != "ok":
         return {
@@ -128,7 +335,40 @@ def parse_node(state: AgentState):
             )
         }
 
-    features = parsed["data"]["features"]
+    features = normalize_features_result(parsed)
+
+    if not features:
+        return {
+            "valid": False,
+            "response": "❌ Parsed output did not contain usable features."
+        }
+
+    return {
+        "features": features,
+        "valid": True,
+        "patient_id": state.get("patient_id")
+
+    }
+
+
+def validate_node(state: AgentState):
+    print("👉 validate_node")
+
+    validated = tool_provider.validate_features(state["features"])
+
+    if validated.get("status") != "ok":
+        return {
+            "valid": False,
+            "response": validated.get("message", "❌ Validation failed")
+        }
+
+    features = normalize_features_result(validated)
+
+    if not features:
+        return {
+            "valid": False,
+            "response": "❌ Validation output did not contain usable features."
+        }
 
     return {
         "features": features,
@@ -136,24 +376,10 @@ def parse_node(state: AgentState):
     }
 
 
-def validate_node(state: AgentState):
-
-    print("👉 validate_node")
-
-    validated = validate_features.invoke({
-        "features": state["features"]
-    })
-
-    return {"features": validated["data"]["features"]}
-
-
 def complete_node(state: AgentState):
-
     print("👉 complete_node")
 
-    completed = complete_features.invoke({
-        "features": state["features"]
-    })
+    completed = tool_provider.complete_features(state["features"])
 
     if completed.get("status") != "ok":
         return {
@@ -161,32 +387,32 @@ def complete_node(state: AgentState):
             "response": completed.get("message", "Completion failed")
         }
 
+    features = normalize_features_result(completed)
+
+    if not features:
+        return {
+            "valid": False,
+            "response": "❌ Completion output did not contain usable features."
+        }
+
     return {
-        "features": completed["data"]["features"],
+        "features": features,
         "valid": True
     }
 
-# -------------------------
-# PREDICT
-# -------------------------
-def predict_node(state):
 
+def predict_node(state: AgentState):
     print("👉 predict_node")
 
     features = state.get("features", {})
+    pred = tool_provider.predict(features)
 
-    pred = predict.invoke({
-        "features": features
-    })
-
-    return {"prediction": pred}
+    return {
+        "prediction": pred
+    }
 
 
-# -------------------------
-# RESPONSE
-# -------------------------
-def response_node(state):
-
+def response_node(state: AgentState):
     print("👉 response_node")
 
     if not state.get("valid", True):
@@ -196,55 +422,86 @@ def response_node(state):
 
     pred = state.get("prediction", {})
 
+    print("PREDICTION:", pred)
+    print("FOLLOWUP_INTENT:", state.get("followup_intent"))
+
     if pred.get("status") != "ok":
         return {
             "response": f"Error: {pred.get('message')}"
         }
+
+    stored_prefs = state.get("clinician_preferences", {})
+    planner_update = state.get("session_preferences_update", {})
+    prefs = merge_preferences(stored_prefs, planner_update)
+
+
 
     risk = pred.get("risk")
     prob = pred.get("probability")
     analysis = pred.get("analysis", "")
     top_features = pred.get("top_features", [])
 
+    response_style = prefs.get("response_style", "detailed")
+    show_top_features = prefs.get("show_top_features", True)
+    top_k_features = int(prefs.get("top_k_features", 5))
+
     features_text = "\n".join([
         f"- {f['feature']} = {f['value']} (contribution={f['contribution']:.3f})"
-        for f in top_features[:5]
+        for f in top_features[:top_k_features]
     ])
 
+    if response_style == "concise":
+        parts = [
+            f"Risk: {risk}",
+            f"Probability: {prob:.3f}",
+        ]
+
+        if show_top_features and features_text:
+            parts.append(f"Top Features:\n{features_text}")
+
+        if analysis:
+            parts.append(f"AI Analysis:\n{analysis}")
+
+        response = "\n\n".join(parts)
+
+    else:
+        parts = [
+            f"Risk: {risk}",
+            f"Probability: {prob:.3f}",
+        ]
+
+        if show_top_features:
+            parts.append(
+                f"Top Features:\n{features_text if features_text else 'No important features'}"
+            )
+
+        if analysis:
+            parts.append(f"AI Analysis:\n{analysis}")
+
+        response = "\n\n".join(parts)
+
     return {
-        "response": f"""
-            Risk: {risk}
-            Probability: {prob:.3f}
-
-            Top Features:
-            {features_text if features_text else "No important features"}
-
-            AI Analysis:
-            {analysis}
-            """
+        "response": response.strip(),
+        "clinician_preferences": prefs
     }
 
-# -------------------------
-# GRAPH
-# -------------------------
-def build_graph():
 
+def build_graph():
     graph = StateGraph(AgentState)
 
+    graph.add_node("load_memory_context", load_memory_context_node)
     graph.add_node("route", route_node)
-
     graph.add_node("fetch", fetch_node)
-
     graph.add_node("parse", parse_node)
     graph.add_node("validate", validate_node)
     graph.add_node("complete", complete_node)
-
     graph.add_node("predict", predict_node)
     graph.add_node("respond", response_node)
 
-    graph.set_entry_point("route")
+    graph.set_entry_point("load_memory_context")
 
-    # routing
+    graph.add_edge("load_memory_context", "route")
+
     graph.add_conditional_edges(
         "route",
         lambda x: x["route"],
@@ -254,18 +511,17 @@ def build_graph():
         }
     )
 
-    # patient flow
     graph.add_edge("fetch", "predict")
 
-    # text flow
     graph.add_conditional_edges(
-            "parse",
-            lambda x: x.get("valid", True),
-            {
-                True: "validate",
-                False: "respond"
-            }
-        )
+        "parse",
+        lambda x: x.get("valid", True),
+        {
+            True: "validate",
+            False: "respond"
+        }
+    )
+
     graph.add_edge("validate", "complete")
 
     graph.add_conditional_edges(
@@ -276,17 +532,15 @@ def build_graph():
             False: "respond"
         }
     )
-    
-    # final
+
     graph.add_edge("predict", "respond")
     graph.add_edge("respond", END)
 
-    # compile graph
-    graph = graph.compile()
+    checkpointer = get_checkpointer()
+    graph = graph.compile(checkpointer=checkpointer)
 
-    # draw graph
-    png_bytes = graph.get_graph().draw_mermaid_png()
-    with open("langgraph.png", "wb") as f:
-        f.write(png_bytes)
+    # png_bytes = graph.get_graph().draw_mermaid_png()
+    # with open("langgraph.png", "wb") as f:
+    #     f.write(png_bytes)
 
     return graph

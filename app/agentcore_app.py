@@ -1,68 +1,68 @@
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 import uuid
 
-# -------------------------
-# INIT APP
-# -------------------------
+from agent.graph import build_graph
+from agent.clinical_memory_service import ClinicalMemoryService
+from services.prediction_pipeline import init_pipeline
+
+
 app = BedrockAgentCoreApp()
 
-graph = None
+print("🔥 Warming AgentCore app...")
 
-def get_graph():
-    global graph
-    if graph is None:
-        print("🧠 Building graph...")
-        from agent.graph import build_graph
-        graph = build_graph()
-    return graph
+graph = build_graph()
+memory_service = ClinicalMemoryService()
 
-# -------------------------
-# ENTRYPOINT
-# -------------------------
+try:
+    init_pipeline()
+except Exception as e:
+    print(f"⚠️ Pipeline warmup failed: {e}")
+
+print("✅ AgentCore app is ready")
+
+
 @app.entrypoint
 def handler(payload, context):
-    """
-    Entry point for the NSCLC survival prediction agent.
-
-    This function receives user input, routes it through the LangGraph-based
-    agent pipeline, and returns a structured prediction response.
-    """
-
-    # -------------------------
-    # INPUT
-    # -------------------------
     user_input = payload.get("input", "")
-    session_id = payload.get("session_id")
-
-    if not session_id:
-        session_id = str(uuid.uuid4())
+    session_id = payload.get("session_id") or str(uuid.uuid4())
+    actor_id = payload.get("actor_id", "default-user")
 
     if not user_input:
         return {
             "status": "error",
             "message": "Missing input"
         }
-    
-    try:
-        g = get_graph()
 
-        result = g.invoke(
-                {
-                    "input": user_input
-                },
-                config={
-                    "configurable": {
-                        "thread_id": session_id,
-                        "actor_id": "nsclc-agent"
-                    }
+    try:
+        result = graph.invoke(
+            {
+                "input": user_input,
+                "actor_id": actor_id,
+                "session_id": session_id
+            },
+            config={
+                "configurable": {
+                    "thread_id": session_id,
+                    "actor_id": actor_id,
                 }
-            )
+            }
+        )
 
         response_text = result.get("response", "")
+        patient_id = result.get("patient_id")
+
+        memory_service.capture_turn(
+            actor_id=actor_id,
+            session_id=session_id,
+            user_text=user_input,
+            assistant_text=response_text
+        )
 
         return {
             "status": "ok",
             "session_id": session_id,
+            "actor_id": actor_id,
+            "patient_id": patient_id,
             "response": response_text
         }
 
@@ -71,7 +71,7 @@ def handler(payload, context):
             "status": "error",
             "message": str(e)
         }
-    
+
 
 if __name__ == "__main__":
     app.run(port=8080)

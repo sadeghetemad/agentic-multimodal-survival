@@ -1,0 +1,16 @@
+[
+  {
+    "name": "predict",
+    "description": "Predict NSCLC survival risk using structured multimodal features",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "features": {
+          "type": "object",
+          "description": "Structured feature dictionary"
+        }
+      },
+      "required": ["features"]
+    }
+  }
+]

@@ -73,7 +73,7 @@ def parse(text: str):
     Text:
     {text}
     """
-
+    print("👉 Parser Prompt:", prompt)
     response = call_llm(prompt)
 
     print("👉 RAW LLM RESPONSE:", response)

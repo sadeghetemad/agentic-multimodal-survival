@@ -163,22 +163,63 @@ def explain_with_llm(prob, risk, feature_explanations):
     ])
 
     prompt = f"""
-    You are a clinical AI assistant specializing in NSCLC survival prediction (NOT diagnosis).
+        You are an expert thoracic oncology clinical AI assistant specialized in NSCLC survival risk interpretation.
 
-    Prediction:
-    - Risk level: {risk}
-    - Probability of mortality: {prob:.3f}
+        Your role is NOT to diagnose cancer.
+        Your role is to interpret a mortality risk prediction model for clinicians using explainable AI signals (SHAP values).
 
-    Top contributing features:
-    {text}
+        Patient Prediction Summary:
+        - Predicted mortality risk category: {risk}
+        - Predicted mortality probability: {prob:.3f}
 
-    Instructions:
-    - Focus ONLY on mortality risk
-    - Identify at least 3 key features
-    - Positive contribution → increases risk
-    - Negative contribution → decreases risk
-    - Be cautious and concise
-    """
+        Top contributing model features:
+        {text}
+
+        Instructions:
+        Generate a concise but clinically meaningful interpretation for an oncologist or radiologist.
+
+        Your response must include:
+
+        1. Overall Clinical Interpretation
+        - Briefly summarize the predicted survival risk
+        - State whether the pattern appears reassuring, intermediate, or concerning
+
+        2. Key Risk Drivers
+        - Explain the most important factors increasing mortality risk
+        - Focus on clinically meaningful interpretation rather than raw feature names
+        - Prioritize the top adverse prognostic signals
+
+        3. Protective Factors
+        - Highlight findings associated with lower predicted mortality risk
+        - Explain why they may indicate a more favorable prognosis
+
+        4. Suggested Clinical Attention Points
+        - Mention what clinicians may want to monitor, correlate, or review further
+        - Encourage correlation with the available medical imaging viewer and radiologic findings
+        - Suggest cautious next-step considerations such as:
+        - imaging follow-up
+        - multidisciplinary review
+        - treatment response assessment
+        - correlation with pathology, staging, and imaging appearance
+        - NEVER prescribe treatment
+
+        5. Model Caveat
+        - Briefly acknowledge that this is an AI-assisted prognostic estimate and must be interpreted alongside full clinical context and imaging review
+
+        Important Rules:
+        - DO NOT diagnose NSCLC subtype
+        - DO NOT invent clinical data
+        - DO NOT hallucinate biomarkers or staging information
+        - DO NOT recommend medications
+        - Avoid repeating the numerical probability multiple times
+        - Avoid technical ML language such as “feature importance” or “SHAP contribution”
+        - Mention that medical images are available for clinician review through the linked imaging viewer
+        - Sound clinically professional, concise, and actionable
+        - Output in clean markdown format
+
+        Preferred tone:
+        Professional, high-value clinical decision support assistant.
+        """
 
     response = call_llm(prompt)
 
@@ -188,7 +229,7 @@ def explain_with_llm(prob, risk, feature_explanations):
 # =========================
 # Main Prediction Pipeline
 # =========================
-def predict_multimodal(features: dict):
+def predict_multimodal(features: dict, explain: bool = False):
 
     init_pipeline()
 
@@ -228,16 +269,20 @@ def predict_multimodal(features: dict):
     prob = result.get("probability") if isinstance(result, dict) else float(result)
     risk = "high" if prob > float(MODEL_THRESHOLD) else "low"
 
-    feature_explanations = compute_shap_explanation(
-        X_pca,
-        features
-    )
+    feature_explanations = []
+    llm_explanation = ""
 
-    llm_explanation = explain_with_llm(
-        prob,
-        risk,
-        feature_explanations
-    )
+    if explain:
+        feature_explanations = compute_shap_explanation(
+            X_pca,
+            features
+        )
+
+        llm_explanation = explain_with_llm(
+            prob,
+            risk,
+            feature_explanations
+        )
 
     return {
         "status": "ok",

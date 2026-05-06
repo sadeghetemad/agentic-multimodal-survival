@@ -1,7 +1,6 @@
 # aws ecr get-login-password --region eu-west-2 | docker login --username AWS --password-stdin 811165582441.dkr.ecr.eu-west-2.amazonaws.com
 # docker buildx build --platform linux/arm64 -t 811165582441.dkr.ecr.eu-west-2.amazonaws.com/nsclc-agentic-ai:0.0.1-prod --push .   
 
-
 import boto3
 import json
 
